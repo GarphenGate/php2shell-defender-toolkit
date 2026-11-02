@@ -39,12 +39,25 @@ EOF
 expect "oom: finds bursts in FPM + Apache (+.gz)" 1 '07:43' -- bash "$here/hunt/oom-fatal-bursts.sh" "$tmp/php8.3-fpm.log" "$tmp/error.log.1.gz"
 expect "oom: clean log is quiet" 0 'no OOM fatals' -- bash "$here/hunt/oom-fatal-bursts.sh" "$tmp/clean.log"
 expect "crashes: signal deaths found" 1 'exit signal Segmentation fault' -- bash "$here/hunt/child-crashes.sh" "$tmp/error.log" "$tmp/php8.3-fpm.log"
-expect "crashes: code-70 recycle reported as expected" 1 "exited with code 70" -- bash "$here/hunt/child-crashes.sh" "$tmp/php8.3-fpm.log"
+expect "crashes: code-70 exits reported" 1 "exited with code 70" -- bash "$here/hunt/child-crashes.sh" "$tmp/php8.3-fpm.log"
 expect "crashes: clean log is quiet" 0 'no signal deaths' -- bash "$here/hunt/child-crashes.sh" "$tmp/clean.log"
 expect "sessid: flags the 31-byte marker" 1 'length 31' -- bash "$here/hunt/phpsessid-anomalies.sh" "$tmp/php2shell.log"
 expect "sessid: flags percent-encoding" 1 'percent-encoded' -- bash "$here/hunt/phpsessid-anomalies.sh" "$tmp/php2shell.log"
 expect "sessid: real 32-char ID not flagged" 0 'no anomalous' -- bash "$here/hunt/phpsessid-anomalies.sh" <(head -n 1 "$tmp/php2shell.log")
 expect "sessid: custom baseline" 0 'no anomalous' -- bash "$here/hunt/phpsessid-anomalies.sh" -l 31,32 <(head -n 2 "$tmp/php2shell.log")
+
+# --- patched-build telemetry and exit codes (not patch indicators)
+cat >"$tmp/patched-fpm.log" <<'EOF'
+[23-Oct-2026 09:10:01] WARNING: [pool www] child 610 said into stderr: "Hard memory limit of 268435456 bytes exhausted (tried to allocate 2097160 bytes) in Unknown on line 0"
+[23-Oct-2026 09:10:01] WARNING: [pool www] child 610 exited with code 137 after 0.412345 seconds from start
+[23-Oct-2026 09:10:04] WARNING: [pool www] child 611 exited with code 70 after 0.201234 seconds from start
+EOF
+expect "oom: patched hard-limit message found" 1 'Hard memory limit' -- bash "$here/hunt/oom-fatal-bursts.sh" "$tmp/patched-fpm.log"
+expect "crashes: code 137 reported" 0 'code 137.*hard memory limit' -- bash "$here/hunt/child-crashes.sh" "$tmp/patched-fpm.log"
+expect "crashes: code 70 not called a patch effect" 0 'request startup failed \(patched or not\)' -- bash "$here/hunt/child-crashes.sh" "$tmp/patched-fpm.log"
+# a legitimate 32-character ID with session.sid_bits_per_character=6: PHP sends "," as %2C
+printf '%s\n' '192.0.2.9 [23/Oct/2026:09:00:00 +0000] "GET / HTTP/1.1" 200 "PHPSESSID=0123456789ABCDEFGHIJKLMNOPQRS%2C-x; path=/"' >"$tmp/bits6.log"
+expect "sessid: %2C comma in a bits=6 ID not flagged" 0 'no anomalous' -- bash "$here/hunt/phpsessid-anomalies.sh" "$tmp/bits6.log"
 
 # --- stub PHP binaries
 mkstub() {  # mkstub NAME VERSION HANDLER PROGRESS

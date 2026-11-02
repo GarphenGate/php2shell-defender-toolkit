@@ -2,11 +2,21 @@
 # oom-fatal-bursts.sh: hunt for the PHP2Shell trigger signature
 # (CVE-2026-109618 / CVE-2026-109619).
 #
-# Every exploitation attempt has to force an out-of-memory fatal while PHP
-# parses a multipart request, so attempts leave
+# In our lab every exploitation attempt forced an out-of-memory fatal while PHP
+# parsed a multipart request, so attempts leave
 #   "Allowed memory size of N bytes exhausted (tried to allocate M bytes)"
-# in PHP, PHP-FPM or Apache error logs. One such line is ordinary; a burst of
+# in PHP, PHP-FPM or Apache error logs. Patched builds add a second, higher
+# hard limit that logs (to the worker's stderr, so visible on PHP-FPM only with
+# catch_workers_output=yes)
+#   "Hard memory limit of N bytes exhausted (tried to allocate M bytes)"
+# and ends the worker with exit code 137. One such line is ordinary; a burst of
 # them, lined up with multipart POSTs, is the signal.
+#
+# Limits: CVE-2026-109619 can also be started by other fatal errors (PHP's
+# advisory lists parse and compile failures, uncaught errors, failed require
+# and "Maximum execution time exceeded"), so treat bursts of any fatal the same
+# way. Hosts running memory_limit=-1 (PHP's primary interim mitigation) do not
+# log "Allowed memory size" fatals at all.
 #
 # usage: oom-fatal-bursts.sh [LOG ...]
 #   With no arguments it reads the usual Debian/Ubuntu/RHEL locations,
@@ -23,12 +33,12 @@ if [ ${#logs[@]} -eq 0 ]; then
 fi
 [ ${#logs[@]} -gt 0 ] || { echo "no readable log found; pass the paths explicitly" >&2; exit 2; }
 
-pat='Allowed memory size of [0-9]+ bytes exhausted'
+pat='(Allowed memory size|Hard memory limit) of [0-9]+ bytes exhausted'
 read_log() { case "$1" in *.gz) zcat -f -- "$1" ;; *) cat -- "$1" ;; esac 2>/dev/null; }
 
 hits=$(for f in "${logs[@]}"; do read_log "$f" | grep -E "$pat" | sed "s|^|${f##*/}: |"; done)
 if [ -z "$hits" ]; then
-  echo "no OOM fatals in ${#logs[@]} log file(s)"
+  echo "no OOM fatals in ${#logs[@]} log file(s) (none logged at all if memory_limit=-1)"
   exit 0
 fi
 

@@ -17,12 +17,12 @@ PHP's own framing applies to every item below: interim measures reduce exposure 
 ## Memory limits
 
 - [ ] Know each host's `memory_limit`. The public trigger is calibrated to a finite, reachable limit, which makes it a triage signal, not a shield.
-- [ ] PHP's interim is `memory_limit=-1`, set so applications can't override it. An underlying allocation failure can still reach the vulnerable path.
+- [ ] PHP's primary configuration interim for CVE-2026-109618 is `memory_limit=-1`, set so applications can't override it. An underlying allocation failure can still reach the vulnerable path, and it also removes the "Allowed memory size" fatals that `hunt/oom-fatal-bursts.sh` looks for.
 - [ ] Do not substitute `RLIMIT_AS` or `RLIMIT_DATA`: they can force the allocation failures that trigger the bug.
 
 ## Workers
 
-- [ ] PHP-FPM: a finite `pm.max_requests` shortens the window in which the same worker serves a fatal request and the follow-up the stale-state bugs need. It delays chaining; it does not prevent it.
+- [ ] PHP-FPM: a finite `pm.max_requests` shortens the window in which the same worker serves a fatal request and the follow-up the stale-state bugs need. It delays chaining; it does not prevent it. Where performance allows, PHP's advisory suggests `pm.max_requests=1`, which removes same-worker reuse.
 - [ ] Prefork / mod_php: schedule graceful restarts until patched. mod_php is the highest-risk SAPI.
 
 ## CVE-2026-115560
@@ -33,7 +33,7 @@ PHP's own framing applies to every item below: interim measures reduce exposure 
 ## Telemetry while you patch
 
 - [ ] Forward PHP/FPM/Apache error logs and alert on bursts of "Allowed memory size … exhausted".
-- [ ] Alert on worker deaths by SIGABRT or SIGSEGV.
+- [ ] Alert on worker deaths by SIGABRT or SIGSEGV, and on bursts of PHP-FPM `exited with code 70` (request startup failed, on any build) or `137` (patched builds' hard memory limit). Exit codes do not show whether a host is patched.
 - [ ] Log `Set-Cookie` at the proxy for the hunt window only (`nginx/php2shell-setcookie-logging.conf`), then remove it.
 - [ ] Hunt backwards at least two weeks: attacks were seen before the 21 October release.
 

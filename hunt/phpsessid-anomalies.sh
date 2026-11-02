@@ -6,7 +6,9 @@
 # The disclosure variant makes PHP URL-encode whatever sits in a freed heap
 # slot into the next response's PHPSESSID cookie. A real session ID has a
 # fixed length and a fixed alphabet; a leaked one usually has the wrong
-# length, percent-encoding (%XX never appears in a real ID) or other bytes.
+# length, percent-encoding or other bytes. PHP URL-encodes the ID when it sets
+# the cookie, so with session.sid_bits_per_character=6 a legitimate comma is
+# sent as %2C: the hunt decodes %2C first, and any other %XX is anomalous.
 #
 # Input: a log that records the Set-Cookie response header, for example the
 # temporary nginx format in ../nginx/php2shell-setcookie-logging.conf.
@@ -40,6 +42,7 @@ done | awk -v lens="$lengths" '
       rest = substr(rest, p + 10)
       v = rest
       sub(/[;" \t].*$/, "", v)            # value ends at ; quote or whitespace
+      gsub(/%2[Cc]/, ",", v)                # PHP sends "," (bits_per_character=6) as %2C
       why = ""
       if (!(length(v) in ok))       why = why "length " length(v) " "
       if (v ~ /%/)                  why = why "percent-encoded "
