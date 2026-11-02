@@ -11,8 +11,8 @@ The full write-up, with our lab evidence and the reasoning behind every check he
 
 | Branch | Fixed in | Note |
 |---|---|---|
-| 8.5 | **8.5.12** | `fatal_error_backtraces=0` is an interim for one CVE-2026-109619 path |
-| 8.4 | **8.4.27** | the public one-click exploit targets 8.4.26 under mod_php |
+| 8.5 | **8.5.12** | `fatal_error_backtraces=0` is an interim for one CVE-2026-109619 path; the public Exploit-DB exploit (52704) targets 8.5.11 under Apache mod_php |
+| 8.4 | **8.4.27** | |
 | 8.3 | **8.3.36** | |
 | 8.2 | **8.2.35** | the branch reaches end of life on 31 December 2026 |
 | 8.1 and older | no official release | PHP published minimal source backports for 7.4, 8.0 and 8.1; otherwise vendor LTS or migrate |
@@ -27,8 +27,8 @@ CVE-2026-115560 (disclosed 23 October 2026) has no out-of-band release. It needs
 |---|---|---|
 | [`audit/php-exposure-check.sh`](audit/php-exposure-check.sh) | Version against the floors, mod_php or FPM, and the settings that decide triage order | 109618, 109619, 115560 |
 | [`audit/cve-2026-115560-audit.sh`](audit/cve-2026-115560-audit.sh) | Checks an application for the runtime serialize-handler switch, the configured baseline and upload progress | 115560 |
-| [`hunt/oom-fatal-bursts.sh`](hunt/oom-fatal-bursts.sh) | Bursts of "Allowed memory size … exhausted" fatals, the trigger every attempt leaves | 109618, 109619 |
-| [`hunt/child-crashes.sh`](hunt/child-crashes.sh) | Apache and PHP-FPM workers dying by SIGABRT or SIGSEGV; FPM "exited with code 70" recycles reported separately | 109618, 109619 |
+| [`hunt/oom-fatal-bursts.sh`](hunt/oom-fatal-bursts.sh) | Bursts of "Allowed memory size … exhausted" fatals (the trigger every attempt left in our lab) and patched builds' "Hard memory limit … exhausted" | 109618, 109619 |
+| [`hunt/child-crashes.sh`](hunt/child-crashes.sh) | Apache and PHP-FPM workers dying by SIGABRT or SIGSEGV; FPM "exited with code 70" (request startup failed) and "code 137" (hard memory limit) exits reported separately | 109618, 109619 |
 | [`hunt/phpsessid-anomalies.sh`](hunt/phpsessid-anomalies.sh) | `PHPSESSID` response cookies that cannot be a real session ID: the memory-disclosure fingerprint | 109618, 109619 |
 | [`nginx/php2shell-setcookie-logging.conf`](nginx/php2shell-setcookie-logging.conf) | Temporary nginx logging of the `Set-Cookie` response header, which default access logs leave out | 109618, 109619 |
 | [`docs/hardening-checklist.md`](docs/hardening-checklist.md) | Interim hardening while patching waits | all three |
@@ -45,7 +45,7 @@ bash tests/run-tests.sh                      # self-test on synthetic data
 # 1. Where does this host sit?
 bash audit/php-exposure-check.sh             # or pass binaries: php8.3 php-fpm8.3
 
-# 2. Hunt backwards: attacks began before the 21 October release
+# 2. Hunt backwards: attacks were reported before the 21 October release
 bash hunt/oom-fatal-bursts.sh                # default log locations, rotated .gz included
 bash hunt/child-crashes.sh
 
@@ -64,9 +64,10 @@ Run each hunt on a known-clean period first. A real session ID is 32 characters 
 
 ## Reading the results
 
-- **OOM fatal bursts** lined up with multipart POSTs are the trigger signature. One fatal on its own is ordinary.
-- **Signal deaths** (SIGABRT, SIGSEGV) on POST-heavy endpoints are worth an investigation. On a patched PHP-FPM build, a fatal ends in a controlled `exited with code 70` recycle instead.
-- **Anomalous `PHPSESSID` values** (wrong length, `%XX` encoding, unexpected bytes) are a strong unpatched-or-bypassed signal: on the patched hosts in our lab, the same requests produced clean, fresh session IDs every time.
+- **OOM fatal bursts** lined up with multipart POSTs are the trigger signature. One fatal on its own is ordinary. CVE-2026-109619 can also be started by other fatal errors (parse and compile failures, uncaught errors, failed `require`, `Maximum execution time exceeded`), so treat bursts of any fatal the same way. Hosts running `memory_limit=-1` log no "Allowed memory size" fatals at all.
+- **Signal deaths** (SIGABRT, SIGSEGV) on POST-heavy endpoints are worth an investigation.
+- **FPM exit codes are not a patch indicator.** PHP-FPM ends a worker with `exited with code 70` whenever request startup fails, on patched and unpatched builds alike, so a burst of them lined up with multipart POSTs is an attempt signal. Patched builds add a hard memory limit that ends the worker with `exited with code 137`. Confirm patch status from the PHP version or the package changelog.
+- **Anomalous `PHPSESSID` values** (wrong length, `%XX` encoding other than `%2C`, unexpected bytes) are a strong unpatched-or-bypassed signal: on the patched hosts in our lab, the same requests produced clean, fresh session IDs every time. PHP URL-encodes the ID in the cookie, so with `session.sid_bits_per_character=6` a legitimate comma arrives as `%2C`; the hunt decodes it first.
 - A quiet result on one host says that these signals are absent on that host, in those logs. It does not prove the host cannot be exploited; exploitability depends on version, SAPI, ini settings, loaded extensions and how the application handles requests.
 
 ## Sources
